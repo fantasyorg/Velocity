@@ -160,4 +160,17 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
   public ProtocolUtils.Direction getDirection() {
     return direction;
   }
+
+  public ProtocolVersion getProtocolVersion() {
+    return registry.version;
+  }
+
+  /**
+   * Whether a packet with this id may travel through the proxy without being decoded: only in the
+   * play state, and only when no packet class is registered for it (chunks, entities, block
+   * updates). Everything the proxy reads or rewrites keeps taking the normal path.
+   */
+  public boolean isPassthroughCandidate(int packetId) {
+    return state == StateRegistry.PLAY && !registry.containsPacket(packetId);
+  }
 }

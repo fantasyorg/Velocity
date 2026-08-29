@@ -28,11 +28,19 @@ import com.velocitypowered.proxy.util.except.QuietDecoderException;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToMessageDecoder;
+import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Decompresses a Minecraft packet.
+ *
+ * <p>With a {@link MinecraftDecoder} attached and passthrough enabled (clientbound only), a
+ * compressed frame whose packet the proxy does not decode is not inflated at all: only enough of
+ * the payload is inflated to read the packet id, and the frame travels on as a
+ * {@link CompressedFrame} to be written to the player exactly as it arrived.
  */
 public class MinecraftCompressDecoder extends MessageToMessageDecoder<ByteBuf> {
 
@@ -46,13 +54,22 @@ public class MinecraftCompressDecoder extends MessageToMessageDecoder<ByteBuf> {
   private static final int SERVERBOUND_UNCOMPRESSED_CAP =
           Boolean.getBoolean("velocity.increased-compression-cap")
                   ? HARD_MAXIMUM_UNCOMPRESSED_SIZE : SERVERBOUND_MAXIMUM_UNCOMPRESSED_SIZE;
-  private static final boolean SKIP_COMPRESSION_VALIDATION = Boolean.getBoolean("velocity.skip-uncompressed-packet-size-validation");
-  private final ProtocolUtils.Direction direction;
 
+  private static final boolean SKIP_COMPRESSION_VALIDATION = Boolean.getBoolean("velocity.skip-uncompressed-packet-size-validation");
+
+  /** A packet id is a varint of at most 5 bytes; that is all the peek ever needs to inflate. */
+  private static final int PEEK_BYTES = 5;
+
+  private final ProtocolUtils.Direction direction;
   private int threshold;
   private final VelocityCompressor compressor;
   @Nullable
   private PacketLimiter packetLimiter;
+
+  private final @Nullable MinecraftDecoder minecraftDecoder;
+  private final boolean passthrough;
+  private @Nullable Inflater peekInflater;
+  private final byte[] peekBuffer = new byte[PEEK_BYTES];
 
   /**
    * Creates a new {@code MinecraftCompressDecoder} with the specified compression {@code threshold}.
@@ -62,13 +79,32 @@ public class MinecraftCompressDecoder extends MessageToMessageDecoder<ByteBuf> {
    * @param direction the direction of the packets being decoded
    */
   public MinecraftCompressDecoder(int threshold, VelocityCompressor compressor, ProtocolUtils.Direction direction) {
+    this(threshold, compressor, direction, null, false);
+  }
+
+  /**
+   * Creates a new {@code MinecraftCompressDecoder} that may forward undecoded frames compressed.
+   *
+   * @param threshold the threshold for compression
+   * @param compressor the compressor instance to use
+   * @param direction the direction of the packets being decoded
+   * @param minecraftDecoder the decoder that knows which packets the proxy needs to read
+   * @param passthrough whether undecoded clientbound frames may skip inflation
+   */
+  public MinecraftCompressDecoder(int threshold, VelocityCompressor compressor,
+      ProtocolUtils.Direction direction, @Nullable MinecraftDecoder minecraftDecoder,
+      boolean passthrough) {
     this.threshold = threshold;
     this.compressor = compressor;
     this.direction = direction;
+    this.minecraftDecoder = minecraftDecoder;
+    this.passthrough = passthrough && minecraftDecoder != null
+        && direction == ProtocolUtils.Direction.CLIENTBOUND;
   }
 
   @Override
   protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+    int frameStart = in.readerIndex();
     int claimedUncompressedSize = ProtocolUtils.readVarInt(in);
     if (claimedUncompressedSize == 0) {
       if (!SKIP_COMPRESSION_VALIDATION) {
@@ -96,6 +132,18 @@ public class MinecraftCompressDecoder extends MessageToMessageDecoder<ByteBuf> {
               "Uncompressed size %s exceeds hard threshold of %s", claimedUncompressedSize,
               SERVERBOUND_UNCOMPRESSED_CAP);
     }
+
+    if (passthrough) {
+      int packetId = peekPacketId(in);
+      if (packetId >= 0 && minecraftDecoder.isPassthroughCandidate(packetId)) {
+        // Hand the frame on untouched, reader back at the uncompressed-size varint.
+        ByteBuf frame = in.retainedSlice(frameStart, in.writerIndex() - frameStart);
+        out.add(new CompressedFrame(frame, packetId, claimedUncompressedSize, threshold,
+            minecraftDecoder.getProtocolVersion()));
+        return;
+      }
+    }
+
     ByteBuf compatibleIn = ensureCompatible(ctx.alloc(), compressor, in);
     ByteBuf uncompressed = preferredBuffer(ctx.alloc(), compressor, claimedUncompressedSize);
     try {
@@ -115,9 +163,53 @@ public class MinecraftCompressDecoder extends MessageToMessageDecoder<ByteBuf> {
     }
   }
 
+  /**
+   * Inflates just the head of the payload and reads the packet id varint from it. Does not move
+   * the reader index. Returns -1 when the id cannot be read this way; the caller then inflates the
+   * whole frame as usual, which reports any real corruption with the usual error.
+   */
+  private int peekPacketId(ByteBuf in) {
+    Inflater inflater = this.peekInflater;
+    if (inflater == null) {
+      inflater = this.peekInflater = new Inflater();
+    } else {
+      inflater.reset();
+    }
+
+    try {
+      ByteBuffer input = in.nioBuffer(in.readerIndex(), in.readableBytes());
+      inflater.setInput(input);
+
+      int produced = 0;
+      while (produced < PEEK_BYTES) {
+        int n = inflater.inflate(peekBuffer, produced, PEEK_BYTES - produced);
+        if (n == 0 && (inflater.finished() || inflater.needsInput() || inflater.needsDictionary())) {
+          break;
+        }
+        produced += n;
+      }
+
+      int id = 0;
+      for (int i = 0; i < produced; i++) {
+        int b = peekBuffer[i];
+        id |= (b & 0x7F) << (7 * i);
+        if ((b & 0x80) == 0) {
+          return id;
+        }
+      }
+      return -1;
+    } catch (DataFormatException e) {
+      return -1;
+    }
+  }
+
   @Override
   public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
     compressor.close();
+    if (peekInflater != null) {
+      peekInflater.end();
+      peekInflater = null;
+    }
   }
 
   public void setThreshold(int threshold) {

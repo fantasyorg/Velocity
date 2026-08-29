@@ -29,8 +29,12 @@ import java.util.zip.DataFormatException;
 
 /**
  * Handler for compressing Minecraft packets.
+ *
+ * <p>Besides raw payloads, accepts a {@link CompressedFrame} taken from a backend connection: when
+ * it was compressed under the same threshold as this connection it is written as it is (with one
+ * length varint in front); otherwise it is inflated and compressed like any other payload.
  */
-public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<ByteBuf> {
+public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<Object> {
 
   private int threshold;
   private final VelocityCompressor compressor;
@@ -41,7 +45,58 @@ public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<By
   }
 
   @Override
-  protected void encode(ChannelHandlerContext ctx, ByteBuf msg, ByteBuf out) throws Exception {
+  public boolean acceptOutboundMessage(Object msg) {
+    return msg instanceof ByteBuf || msg instanceof CompressedFrame;
+  }
+
+  @Override
+  protected void encode(ChannelHandlerContext ctx, Object message, ByteBuf out) throws Exception {
+    if (message instanceof CompressedFrame frame) {
+      if (canForward(frame)) {
+        ByteBuf content = frame.content();
+        int length = content.readableBytes();
+        ProtocolUtils.writeVarInt(out, length);
+        out.writeBytes(content, content.readerIndex(), length);
+        CompressedFrameStats.passed(length);
+        return;
+      }
+      ByteBuf inflated = inflate(ctx, frame);
+      try {
+        CompressedFrameStats.recompressed(inflated.readableBytes());
+        encodePayload(ctx, inflated, out);
+      } finally {
+        inflated.release();
+      }
+      return;
+    }
+    encodePayload(ctx, (ByteBuf) message, out);
+  }
+
+  private boolean canForward(CompressedFrame frame) {
+    return !frame.isForceRecompress() && frame.getThreshold() == this.threshold;
+  }
+
+  /** Recovers the raw payload of a frame that cannot travel compressed as it is. */
+  private ByteBuf inflate(ChannelHandlerContext ctx, CompressedFrame frame)
+      throws DataFormatException {
+    ByteBuf content = frame.content().slice();
+    ProtocolUtils.readVarInt(content); // the uncompressed size, already known from the frame
+    ByteBuf compatibleIn = MoreByteBufUtils.ensureCompatible(ctx.alloc(), compressor, content);
+    ByteBuf uncompressed = MoreByteBufUtils.preferredBuffer(ctx.alloc(), compressor,
+        frame.getUncompressedSize());
+    try {
+      compressor.inflate(compatibleIn, uncompressed, frame.getUncompressedSize());
+      return uncompressed;
+    } catch (Exception e) {
+      uncompressed.release();
+      throw e;
+    } finally {
+      compatibleIn.release();
+    }
+  }
+
+  private void encodePayload(ChannelHandlerContext ctx, ByteBuf msg, ByteBuf out)
+      throws DataFormatException {
     int uncompressed = msg.readableBytes();
     if (uncompressed < threshold) {
       // Under the threshold, there is nothing to do.
@@ -77,8 +132,19 @@ public class MinecraftCompressorAndLengthEncoder extends MessageToByteEncoder<By
   }
 
   @Override
-  protected ByteBuf allocateBuffer(ChannelHandlerContext ctx, ByteBuf msg, boolean preferDirect)
+  protected ByteBuf allocateBuffer(ChannelHandlerContext ctx, Object message, boolean preferDirect)
       throws Exception {
+    if (message instanceof CompressedFrame frame) {
+      if (canForward(frame)) {
+        int length = frame.content().readableBytes();
+        return ctx.alloc().directBuffer(length + ProtocolUtils.varIntBytes(length));
+      }
+      int uncompressed = frame.getUncompressedSize();
+      return MoreByteBufUtils.preferredBuffer(ctx.alloc(), compressor,
+          (uncompressed - 1) + 3 + ProtocolUtils.varIntBytes(uncompressed));
+    }
+
+    ByteBuf msg = (ByteBuf) message;
     int uncompressed = msg.readableBytes();
     if (uncompressed < threshold) {
       int finalBufferSize = uncompressed + 1;
