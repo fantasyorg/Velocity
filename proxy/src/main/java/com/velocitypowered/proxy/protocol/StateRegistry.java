@@ -1069,6 +1069,16 @@ public enum StateRegistry {
       public boolean containsPacket(final MinecraftPacket packet) {
         return this.packetClassToId.containsKey(packet.getClass());
       }
+
+      /**
+       * Whether the proxy decodes packets with this ID in this registry.
+       *
+       * @param id the packet ID
+       * @return true if a packet class is registered for the ID
+       */
+      public boolean containsPacket(final int id) {
+        return this.packetIdToSupplier.containsKey(id);
+      }
     }
   }
 

@@ -43,6 +43,7 @@ import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.VelocityConnectionEvent;
+import com.velocitypowered.proxy.protocol.netty.CompressedFrame;
 import com.velocitypowered.proxy.protocol.netty.MinecraftCipherDecoder;
 import com.velocitypowered.proxy.protocol.netty.MinecraftCipherEncoder;
 import com.velocitypowered.proxy.protocol.netty.MinecraftCompressDecoder;
@@ -163,6 +164,8 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
             proxyMessage.sourcePort());
       } else if (msg instanceof ByteBuf buf) {
         activeSessionHandler.handleUnknown(buf);
+      } else if (msg instanceof CompressedFrame frame) {
+        activeSessionHandler.handleCompressedFrame(frame);
       }
     } finally {
       ReferenceCountUtil.release(msg);
@@ -567,7 +570,9 @@ public class MinecraftConnection extends ChannelInboundHandlerAdapter {
         final MinecraftDecoder minecraftDecoder = (MinecraftDecoder) channel.pipeline().get(MINECRAFT_DECODER);
 
         encoder = new MinecraftCompressorAndLengthEncoder(threshold, compressor);
-        decoder = new MinecraftCompressDecoder(threshold, compressor, minecraftDecoder.getDirection());
+        // Backend side (clientbound frames): frames the proxy does not decode may stay compressed.
+        decoder = new MinecraftCompressDecoder(threshold, compressor, minecraftDecoder.getDirection(),
+            minecraftDecoder, server.getConfiguration().isCompressedPassthrough());
 
         channel.pipeline().remove(FRAME_ENCODER);
         channel.pipeline().addBefore(MINECRAFT_DECODER, COMPRESSION_DECODER, decoder);

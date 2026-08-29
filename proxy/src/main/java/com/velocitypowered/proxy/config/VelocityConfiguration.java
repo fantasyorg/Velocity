@@ -337,6 +337,14 @@ public class VelocityConfiguration implements ProxyConfig {
     return advanced.getCompressionLevel();
   }
 
+  /**
+   * Whether backend frames the proxy does not decode are forwarded to players still compressed
+   * (when both sides share the compression threshold) instead of being inflated and deflated again.
+   */
+  public boolean isCompressedPassthrough() {
+    return advanced.isCompressedPassthrough();
+  }
+
   @Override
   public int getLoginRatelimit() {
     return advanced.getLoginRatelimit();
@@ -759,6 +767,8 @@ public class VelocityConfiguration implements ProxyConfig {
     @Expose
     private int readTimeout = 30000;
     @Expose
+    private boolean compressedPassthrough = true;
+    @Expose
     private boolean proxyProtocol = false;
     @Expose
     private boolean tcpFastOpen = false;
@@ -799,6 +809,7 @@ public class VelocityConfiguration implements ProxyConfig {
         this.loginRatelimit = config.getIntOrElse("login-ratelimit", 3000);
         this.connectionTimeout = config.getIntOrElse("connection-timeout", 5000);
         this.readTimeout = config.getIntOrElse("read-timeout", 30000);
+        this.compressedPassthrough = config.getOrElse("compressed-passthrough", true);
         if (config.contains("haproxy-protocol")) {
           this.proxyProtocol = config.getOrElse("haproxy-protocol", false);
         } else {
@@ -828,6 +839,10 @@ public class VelocityConfiguration implements ProxyConfig {
 
     public int getCompressionLevel() {
       return compressionLevel;
+    }
+
+    public boolean isCompressedPassthrough() {
+      return compressedPassthrough;
     }
 
     public int getLoginRatelimit() {

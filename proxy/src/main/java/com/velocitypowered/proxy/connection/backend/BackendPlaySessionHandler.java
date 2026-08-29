@@ -46,6 +46,7 @@ import com.velocitypowered.proxy.connection.player.resourcepack.handler.Resource
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.StateRegistry;
+import com.velocitypowered.proxy.protocol.netty.CompressedFrame;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.protocol.netty.MinecraftVarintFrameDecoder;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommandsPacket;
@@ -469,6 +470,24 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
   public void handleUnknown(ByteBuf buf) {
     boolean huge = buf.readableBytes() > LARGE_PACKET_THRESHOLD;
     playerConnection.delayedWrite(buf.retain());
+    if (huge || ++packetsFlushed >= MAXIMUM_PACKETS_TO_FLUSH) {
+      playerConnection.flush();
+      packetsFlushed = 0;
+    }
+  }
+
+  /**
+   * A frame the proxy never decoded goes to the player still compressed. The frame is only valid
+   * as-is when both sides speak the same protocol; the versions never differ (the backend is asked
+   * to speak the player's), but if they ever did the encoder inflates and compresses it again.
+   */
+  @Override
+  public void handleCompressedFrame(CompressedFrame frame) {
+    if (frame.getProtocolVersion() != playerConnection.getProtocolVersion()) {
+      frame.setForceRecompress(true);
+    }
+    boolean huge = frame.getUncompressedSize() > LARGE_PACKET_THRESHOLD;
+    playerConnection.delayedWrite(frame.retain());
     if (huge || ++packetsFlushed >= MAXIMUM_PACKETS_TO_FLUSH) {
       playerConnection.flush();
       packetsFlushed = 0;

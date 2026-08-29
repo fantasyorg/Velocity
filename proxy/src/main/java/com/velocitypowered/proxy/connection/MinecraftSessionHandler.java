@@ -18,6 +18,7 @@
 package com.velocitypowered.proxy.connection;
 
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
+import com.velocitypowered.proxy.protocol.netty.CompressedFrame;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommandsPacket;
 import com.velocitypowered.proxy.protocol.packet.BossBarPacket;
 import com.velocitypowered.proxy.protocol.packet.BundleDelimiterPacket;
@@ -102,6 +103,14 @@ public interface MinecraftSessionHandler {
   }
 
   default void handleUnknown(ByteBuf buf) {
+
+  }
+
+  /**
+   * Handles a backend frame that stayed compressed because the proxy has no reason to read it.
+   * Handlers that do not forward it simply let it be released.
+   */
+  default void handleCompressedFrame(CompressedFrame frame) {
 
   }
 

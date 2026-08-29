@@ -34,6 +34,7 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.util.ProxyVersion;
 import com.velocitypowered.proxy.VelocityServer;
+import com.velocitypowered.proxy.protocol.netty.CompressedFrameStats;
 import com.velocitypowered.proxy.util.InformationUtils;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -192,6 +193,21 @@ public final class VelocityCommand {
                 .build())
             .build();
         source.sendMessage(embellishment);
+      }
+
+      // Compressed passthrough: how much of the backend traffic skipped the proxy's deflate.
+      final long passed = CompressedFrameStats.passedFrames();
+      final long recompressed = CompressedFrameStats.recompressedFrames();
+      if (passed > 0 || recompressed > 0) {
+        source.sendMessage(Component.text()
+            .content("Compressed passthrough: ")
+            .color(NamedTextColor.GRAY)
+            .append(Component.text(passed + " frames (" + CompressedFrameStats.passedBytes() / 1048576
+                + " MiB) forwarded as-is, ", NamedTextColor.GREEN))
+            .append(Component.text(recompressed + " frames ("
+                + CompressedFrameStats.recompressedBytes() / 1048576 + " MiB) recompressed",
+                NamedTextColor.YELLOW))
+            .build());
       }
       return Command.SINGLE_SUCCESS;
     }

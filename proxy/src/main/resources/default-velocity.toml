@@ -120,6 +120,12 @@ compression-threshold = 256
 # default level of 6.
 compression-level = -1
 
+# Forward backend packets the proxy does not decode (chunks, entities, block updates) to the
+# player still compressed, instead of inflating and compressing them again. Only takes effect
+# when the backend's network-compression-threshold equals compression-threshold above; any
+# other frame takes the normal path. Compression then happens once, on the backend.
+compressed-passthrough = true
+
 # How fast (in milliseconds) are clients allowed to connect after the last connection? By
 # default, this is three seconds. Disable this by setting this to 0.
 login-ratelimit = 3000
