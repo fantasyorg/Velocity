@@ -22,6 +22,7 @@ import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_8;
 import com.google.common.base.Preconditions;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
+import com.velocitypowered.api.event.connection.LoginSuccessEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.permission.PermissionsSetupEvent;
 import com.velocitypowered.api.event.player.CookieReceiveEvent;
@@ -235,23 +236,37 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
         ServerLoginSuccessPacket success = new ServerLoginSuccessPacket();
         success.setUsername(player.getUsername());
         success.setProperties(player.getGameProfileProperties());
-        success.setUuid(player.getUniqueId());
         if (inbound.getProtocolVersion().noLessThan(ProtocolVersion.MINECRAFT_26_2)) {
           success.setSessionId(server.getSessionId());
         }
-        mcConnection.write(success);
 
-        loginState = State.SUCCESS_SENT;
-        if (inbound.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
-          loginState = State.ACKNOWLEDGED;
-          mcConnection.setActiveSessionHandler(StateRegistry.PLAY, new InitialConnectSessionHandler(player, server));
-          server.getEventManager().fire(new PostLoginEvent(player)).thenCompose((ignored) -> {
-            return connectToInitialServer(player);
-          }).exceptionally((ex) -> {
-            logger.error("Exception while connecting {} to initial server", player, ex);
-            return null;
-          });
-        }
+        // The id the client is told is the plugins' call; the player keeps their own id on the
+        // proxy. Only the packet is written after the event settles.
+        server.getEventManager().fire(new LoginSuccessEvent(player, player.getUniqueId()))
+            .thenAcceptAsync(successEvent -> {
+              if (mcConnection.isClosed()) {
+                return;
+              }
+
+              success.setUuid(successEvent.getUuid());
+              mcConnection.write(success);
+
+              loginState = State.SUCCESS_SENT;
+              if (inbound.getProtocolVersion().lessThan(ProtocolVersion.MINECRAFT_1_20_2)) {
+                loginState = State.ACKNOWLEDGED;
+                mcConnection.setActiveSessionHandler(StateRegistry.PLAY,
+                    new InitialConnectSessionHandler(player, server));
+                server.getEventManager().fire(new PostLoginEvent(player)).thenCompose((ignored) -> {
+                  return connectToInitialServer(player);
+                }).exceptionally((ex) -> {
+                  logger.error("Exception while connecting {} to initial server", player, ex);
+                  return null;
+                });
+              }
+            }, mcConnection.eventLoop()).exceptionally((ex) -> {
+              logger.error("Exception while sending login success to {}", player, ex);
+              return null;
+            });
       }
     }, mcConnection.eventLoop()).exceptionally((ex) -> {
       logger.error("Exception while completing login initialisation phase for {}", player, ex);
