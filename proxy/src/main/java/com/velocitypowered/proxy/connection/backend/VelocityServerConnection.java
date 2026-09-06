@@ -114,7 +114,15 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
       // socket, so enabling the tunnel is harmless for backends that do not speak it.
       tunnel.get().openStream(eventLoop, proxyPlayer.getRemoteAddress(), server.getBackendChannelInitializer())
           .whenComplete((channel, error) -> {
-            if (error == null) {
+            if (!stillWanted()) {
+              // The player left (or asked for another server) while the tunnel was coming up; a
+              // backend connection opened now would belong to nobody and sit in login until it
+              // timed out.
+              if (channel != null) {
+                channel.close();
+              }
+              result.completeExceptionally(new IllegalStateException("Player left while the tunnel was connecting"));
+            } else if (error == null) {
               onBackendChannel(channel, result);
             } else if (tunnel.get().isUnavailable()) {
               eventLoop.execute(() -> connectDirectly(eventLoop, result));
@@ -277,11 +285,16 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
    * Disconnects from the server.
    */
   public void disconnect() {
+    gracefulDisconnect = true;
     if (connection != null) {
-      gracefulDisconnect = true;
       connection.close(false);
       connection = null;
     }
+  }
+
+  /** Whether the player still wants this connection: not disconnected from it, and still online. */
+  private boolean stillWanted() {
+    return !gracefulDisconnect && proxyPlayer.isActive();
   }
 
   @Override

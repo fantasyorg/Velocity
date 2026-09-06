@@ -20,7 +20,9 @@ import org.apache.logging.log4j.Logger;
 public final class BackendTunnel {
 
   private static final Logger logger = LogManager.getLogger(BackendTunnel.class);
+  /** Direct-connect window after a failed attempt; doubles per consecutive failure up to the cap. */
   private static final long UNAVAILABLE_SECONDS = 30;
+  private static final long UNAVAILABLE_SECONDS_MAX = 300;
 
   private final VelocityServer server;
   private final String serverName;
@@ -29,6 +31,7 @@ public final class BackendTunnel {
 
   private CompletableFuture<TunnelClientMultiplexer> connecting;
   private volatile long unavailableUntilNanos;
+  private volatile long unavailableSeconds = UNAVAILABLE_SECONDS;
 
   BackendTunnel(VelocityServer server, String serverName, InetSocketAddress backendAddress, InetSocketAddress tunnelAddress) {
     this.server = server;
@@ -73,7 +76,7 @@ public final class BackendTunnel {
     multiplexer().whenComplete((mux, error) -> {
       if (error != null) {
         // Marked before the caller sees the failure, so its fallback decision reads the flag.
-        this.unavailableUntilNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(UNAVAILABLE_SECONDS);
+        markUnavailable();
         stream.completeExceptionally(error);
         return;
       }
@@ -128,16 +131,34 @@ public final class BackendTunnel {
 
     future.whenComplete((mux, error) -> {
       if (error != null) {
-        logger.warn("Tunnel to {} at {} failed, connecting directly for the next {}s: {}", this.serverName, this.tunnelAddress, UNAVAILABLE_SECONDS, error.toString());
+        long directSeconds = markUnavailable();
+        logger.warn("Tunnel to {} at {} failed, connecting directly for the next {}s: {}", this.serverName, this.tunnelAddress, directSeconds, error.toString());
         synchronized (this) {
           if (this.connecting == future) {
             this.connecting = null;
           }
         }
       } else {
+        this.unavailableSeconds = UNAVAILABLE_SECONDS;
         logger.info("Tunnel to {} established", this.serverName);
       }
     });
+  }
+
+  /**
+   * Starts the direct-connect window for this failure, or returns the one already running when the
+   * sibling callback of the same failure got here first. Each consecutive failure doubles it.
+   */
+  private synchronized long markUnavailable() {
+    long now = System.nanoTime();
+    long remaining = this.unavailableUntilNanos - now;
+    if (remaining > 0) {
+      return TimeUnit.NANOSECONDS.toSeconds(remaining);
+    }
+    long window = this.unavailableSeconds;
+    this.unavailableUntilNanos = now + TimeUnit.SECONDS.toNanos(window);
+    this.unavailableSeconds = Math.min(UNAVAILABLE_SECONDS_MAX, window * 2);
+    return window;
   }
 
   private synchronized void closed() {
