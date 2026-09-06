@@ -31,6 +31,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
 
       - name: Publish velocity-api to GitHub Packages
-        run: ./gradlew :api:publishAllPublicationsToGithubRepository
+        run: ./gradlew :velocity-api:publishAllPublicationsToGithubRepository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
