@@ -1,0 +1,36 @@
+name: Publish velocity-api to GitHub Packages
+
+# A API do fork vai pro GitHub Packages pra os plugins da rede compilarem contra os eventos que só
+# este fork tem. Só a API: o jar do proxy segue pelo catálogo de jars, não pelo Maven.
+on:
+  push:
+    branches:
+      - fantasy/4.0.0
+    paths:
+      - "api/**"
+      - "gradle.properties"
+      - "build-logic/**"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Publish velocity-api to GitHub Packages
+        run: ./gradlew :api:publishAllPublicationsToGithubRepository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
