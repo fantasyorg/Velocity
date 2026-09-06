@@ -32,8 +32,18 @@ public final class BackendTunnelManager {
       return Optional.empty();
     }
 
+    // Servers are registered on the fly and come back from a restart under the same name with a new
+    // port, so a cached tunnel is only reused while it still points at the server's current address.
     InetSocketAddress address = registeredServer.getServerInfo().getAddress();
-    return Optional.of(this.tunnels.computeIfAbsent(name, key -> new BackendTunnel(this.server, key, address,
-        new InetSocketAddress(address.getHostString(), address.getPort() + configuration.getBackendTunnelPortOffset()))));
+    return Optional.of(this.tunnels.compute(name, (key, existing) -> {
+      if (existing != null && existing.getBackendAddress().equals(address)) {
+        return existing;
+      }
+      if (existing != null) {
+        existing.close();
+      }
+      return new BackendTunnel(this.server, key, address,
+          new InetSocketAddress(address.getHostString(), address.getPort() + configuration.getBackendTunnelPortOffset()));
+    }));
   }
 }

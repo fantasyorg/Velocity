@@ -41,6 +41,20 @@ public final class BackendTunnel {
     return this.tunnelAddress;
   }
 
+  public InetSocketAddress getBackendAddress() {
+    return this.backendAddress;
+  }
+
+  /** Drops the socket, if any; open streams end the way they do when a backend goes away. */
+  public synchronized void close() {
+    CompletableFuture<TunnelClientMultiplexer> current = this.connecting;
+    this.connecting = null;
+    if (current == null) {
+      return;
+    }
+    current.thenAccept(mux -> mux.context().close());
+  }
+
   /**
    * Whether the last attempt to reach the tunnel failed recently. Callers connect the ordinary way
    * meanwhile instead of paying a failed handshake per player.
