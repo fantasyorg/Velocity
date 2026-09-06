@@ -115,6 +115,7 @@ public class ServerMap {
         "Server with name %s replaced whilst unregistering", serverInfo.getName());
 
     if (server != null) {
+      server.getBackendTunnels().serverUnregistered(serverInfo.getName());
       server.getEventManager().fireAndForget(new ServerUnregisteredEvent(rs));
     }
   }
