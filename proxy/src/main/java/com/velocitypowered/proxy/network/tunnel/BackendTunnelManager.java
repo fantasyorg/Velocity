@@ -19,6 +19,14 @@ public final class BackendTunnelManager {
     this.server = server;
   }
 
+  /** The server is gone; its tunnel goes with it, and whoever registers the name again starts fresh. */
+  public void serverUnregistered(String name) {
+    BackendTunnel tunnel = this.tunnels.remove(name);
+    if (tunnel != null) {
+      tunnel.close();
+    }
+  }
+
   /** The tunnel for this server, or empty when the server connects the ordinary way. */
   public Optional<BackendTunnel> tunnelFor(RegisteredServer registeredServer) {
     VelocityConfiguration configuration = this.server.getConfiguration();
