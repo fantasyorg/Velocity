@@ -132,8 +132,9 @@ compressed-passthrough = true
 # secret; a backend without it is reached the normal way. An empty server list means every server.
 backend-tunnel = false
 backend-tunnel-servers = []
-# The tunnel port is the server's port plus this offset.
-backend-tunnel-port-offset = 1
+# The tunnel port is the server's port plus this offset; 0 means the game port itself, where the
+# backend tells a tunnel from a player by the first bytes.
+backend-tunnel-port-offset = 0
 backend-tunnel-flush-interval-millis = 10
 backend-tunnel-window-bytes = 1048576
 

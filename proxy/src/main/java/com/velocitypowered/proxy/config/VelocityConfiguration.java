@@ -797,7 +797,7 @@ public class VelocityConfiguration implements ProxyConfig {
     @Expose
     private List<String> backendTunnelServers = ImmutableList.of();
     @Expose
-    private int backendTunnelPortOffset = 1;
+    private int backendTunnelPortOffset = 0;
     @Expose
     private int backendTunnelFlushIntervalMillis = 10;
     @Expose
@@ -846,7 +846,7 @@ public class VelocityConfiguration implements ProxyConfig {
         this.compressedPassthrough = config.getOrElse("compressed-passthrough", true);
         this.backendTunnel = config.getOrElse("backend-tunnel", false);
         this.backendTunnelServers = config.getOrElse("backend-tunnel-servers", ImmutableList.of());
-        this.backendTunnelPortOffset = config.getIntOrElse("backend-tunnel-port-offset", 1);
+        this.backendTunnelPortOffset = config.getIntOrElse("backend-tunnel-port-offset", 0);
         this.backendTunnelFlushIntervalMillis = config.getIntOrElse("backend-tunnel-flush-interval-millis", 10);
         this.backendTunnelWindowBytes = config.getIntOrElse("backend-tunnel-window-bytes", 1 << 20);
         if (config.contains("haproxy-protocol")) {
