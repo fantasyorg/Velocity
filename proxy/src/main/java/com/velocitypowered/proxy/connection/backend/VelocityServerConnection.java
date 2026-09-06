@@ -48,7 +48,10 @@ import com.velocitypowered.proxy.protocol.util.ByteBufDataOutput;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import com.velocitypowered.proxy.network.tunnel.BackendTunnel;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.EventLoop;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -101,35 +104,64 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
     CompletableFuture<Impl> result = new CompletableFuture<>();
     // Note: we use the event loop for the connection the player is on. This reduces context
     // switches.
-    server.createBootstrap(proxyPlayer.getConnection().eventLoop())
+    EventLoop eventLoop = proxyPlayer.getConnection().eventLoop();
+    Optional<BackendTunnel> tunnel = server.getBackendTunnels().tunnelFor(registeredServer).filter(candidate -> !candidate.isUnavailable());
+
+    if (tunnel.isPresent()) {
+      // A stream on the backend's tunnel instead of a socket of its own; it is registered on the
+      // same event loop a socket would be, so everything after this point is unchanged. A tunnel
+      // that cannot be established (backend without the listener, wrong secret) falls back to a
+      // socket, so enabling the tunnel is harmless for backends that do not speak it.
+      tunnel.get().openStream(eventLoop, proxyPlayer.getRemoteAddress(), server.getBackendChannelInitializer())
+          .whenComplete((channel, error) -> {
+            if (error == null) {
+              onBackendChannel(channel, result);
+            } else if (tunnel.get().isUnavailable()) {
+              eventLoop.execute(() -> connectDirectly(eventLoop, result));
+            } else {
+              result.completeExceptionally(error);
+            }
+          });
+      return result;
+    }
+
+    connectDirectly(eventLoop, result);
+    return result;
+  }
+
+  private void connectDirectly(EventLoop eventLoop, CompletableFuture<Impl> result) {
+    server.createBootstrap(eventLoop)
         .handler(server.getBackendChannelInitializer())
         .connect(registeredServer.getServerInfo().getAddress())
         .addListener((ChannelFutureListener) future -> {
           if (future.isSuccess()) {
-            connection = new MinecraftConnection(future.channel(), server);
-            connection.setAssociation(VelocityServerConnection.this);
-            future.channel().pipeline().addLast(HANDLER, connection);
-
-            // Kick off the connection process
-            if (!connection.setActiveSessionHandler(StateRegistry.HANDSHAKE)) {
-              MinecraftSessionHandler handler =
-                  new LoginSessionHandler(server, VelocityServerConnection.this, result);
-              connection.setActiveSessionHandler(StateRegistry.HANDSHAKE, handler);
-              connection.addSessionHandler(StateRegistry.LOGIN, handler);
-            }
-
-            // Set the connection phase, which may, for future forge (or whatever), be
-            // determined
-            // at this point already
-            connectionPhase = connection.getType().getInitialBackendPhase();
-            startHandshake();
+            onBackendChannel(future.channel(), result);
           } else {
             // Complete the result immediately. ConnectedPlayer will reset the in-flight
             // connection.
             result.completeExceptionally(future.cause());
           }
         });
-    return result;
+  }
+
+  private void onBackendChannel(Channel channel, CompletableFuture<Impl> result) {
+    connection = new MinecraftConnection(channel, server);
+    connection.setAssociation(VelocityServerConnection.this);
+    channel.pipeline().addLast(HANDLER, connection);
+
+    // Kick off the connection process
+    if (!connection.setActiveSessionHandler(StateRegistry.HANDSHAKE)) {
+      MinecraftSessionHandler handler =
+          new LoginSessionHandler(server, VelocityServerConnection.this, result);
+      connection.setActiveSessionHandler(StateRegistry.HANDSHAKE, handler);
+      connection.addSessionHandler(StateRegistry.LOGIN, handler);
+    }
+
+    // Set the connection phase, which may, for future forge (or whatever), be
+    // determined
+    // at this point already
+    connectionPhase = connection.getType().getInitialBackendPhase();
+    startHandshake();
   }
 
   String getPlayerRemoteAddressAsString() {

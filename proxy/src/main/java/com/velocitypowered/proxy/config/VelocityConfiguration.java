@@ -345,6 +345,30 @@ public class VelocityConfiguration implements ProxyConfig {
     return advanced.isCompressedPassthrough();
   }
 
+  /**
+   * Whether backend connections go through one multiplexed socket per backend instead of a socket
+   * per player. Empty server list means every server.
+   */
+  public boolean isBackendTunnel() {
+    return advanced.isBackendTunnel();
+  }
+
+  public List<String> getBackendTunnelServers() {
+    return advanced.getBackendTunnelServers();
+  }
+
+  public int getBackendTunnelPortOffset() {
+    return advanced.getBackendTunnelPortOffset();
+  }
+
+  public int getBackendTunnelFlushIntervalMillis() {
+    return advanced.getBackendTunnelFlushIntervalMillis();
+  }
+
+  public int getBackendTunnelWindowBytes() {
+    return advanced.getBackendTunnelWindowBytes();
+  }
+
   @Override
   public int getLoginRatelimit() {
     return advanced.getLoginRatelimit();
@@ -769,6 +793,16 @@ public class VelocityConfiguration implements ProxyConfig {
     @Expose
     private boolean compressedPassthrough = true;
     @Expose
+    private boolean backendTunnel = false;
+    @Expose
+    private List<String> backendTunnelServers = ImmutableList.of();
+    @Expose
+    private int backendTunnelPortOffset = 1;
+    @Expose
+    private int backendTunnelFlushIntervalMillis = 10;
+    @Expose
+    private int backendTunnelWindowBytes = 1 << 20;
+    @Expose
     private boolean proxyProtocol = false;
     @Expose
     private boolean tcpFastOpen = false;
@@ -810,6 +844,11 @@ public class VelocityConfiguration implements ProxyConfig {
         this.connectionTimeout = config.getIntOrElse("connection-timeout", 5000);
         this.readTimeout = config.getIntOrElse("read-timeout", 30000);
         this.compressedPassthrough = config.getOrElse("compressed-passthrough", true);
+        this.backendTunnel = config.getOrElse("backend-tunnel", false);
+        this.backendTunnelServers = config.getOrElse("backend-tunnel-servers", ImmutableList.of());
+        this.backendTunnelPortOffset = config.getIntOrElse("backend-tunnel-port-offset", 1);
+        this.backendTunnelFlushIntervalMillis = config.getIntOrElse("backend-tunnel-flush-interval-millis", 10);
+        this.backendTunnelWindowBytes = config.getIntOrElse("backend-tunnel-window-bytes", 1 << 20);
         if (config.contains("haproxy-protocol")) {
           this.proxyProtocol = config.getOrElse("haproxy-protocol", false);
         } else {
@@ -843,6 +882,26 @@ public class VelocityConfiguration implements ProxyConfig {
 
     public boolean isCompressedPassthrough() {
       return compressedPassthrough;
+    }
+
+    public boolean isBackendTunnel() {
+      return backendTunnel;
+    }
+
+    public List<String> getBackendTunnelServers() {
+      return backendTunnelServers;
+    }
+
+    public int getBackendTunnelPortOffset() {
+      return backendTunnelPortOffset;
+    }
+
+    public int getBackendTunnelFlushIntervalMillis() {
+      return backendTunnelFlushIntervalMillis;
+    }
+
+    public int getBackendTunnelWindowBytes() {
+      return backendTunnelWindowBytes;
     }
 
     public int getLoginRatelimit() {

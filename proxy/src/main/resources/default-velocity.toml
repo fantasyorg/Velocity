@@ -126,6 +126,17 @@ compression-level = -1
 # other frame takes the normal path. Compression then happens once, on the backend.
 compressed-passthrough = true
 
+# Carries every player of a backend over one multiplexed TCP connection to that backend, flushed
+# on a timer, instead of one connection per player flushed per packet. The backend must run the
+# matching tunnel listener (Leaf: network.proxy-tunnel), which authenticates with the forwarding
+# secret; a backend without it is reached the normal way. An empty server list means every server.
+backend-tunnel = false
+backend-tunnel-servers = []
+# The tunnel port is the server's port plus this offset.
+backend-tunnel-port-offset = 1
+backend-tunnel-flush-interval-millis = 10
+backend-tunnel-window-bytes = 1048576
+
 # How fast (in milliseconds) are clients allowed to connect after the last connection? By
 # default, this is three seconds. Disable this by setting this to 0.
 login-ratelimit = 3000

@@ -154,6 +154,7 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
             Integer.getInteger("velocity.pre-shutdown-timeout", 10);
 
   private final ConnectionManager cm;
+  private final com.velocitypowered.proxy.network.tunnel.BackendTunnelManager backendTunnels = new com.velocitypowered.proxy.network.tunnel.BackendTunnelManager(this);
   private final ProxyOptions options;
   private @MonotonicNonNull VelocityConfiguration configuration;
   private @MonotonicNonNull KeyPair serverKeyPair;
@@ -464,6 +465,10 @@ public class VelocityServer implements ProxyServer, ForwardingAudience {
 
   public ChannelInitializer<Channel> getBackendChannelInitializer() {
     return this.cm.backendChannelInitializer.get();
+  }
+
+  public com.velocitypowered.proxy.network.tunnel.BackendTunnelManager getBackendTunnels() {
+    return this.backendTunnels;
   }
 
   public ServerListPingHandler getServerListPingHandler() {
